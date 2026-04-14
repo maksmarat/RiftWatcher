@@ -44,6 +44,9 @@ class RiotAPI:
         data = await self.request(url)
         return data["puuid"] if data else None
 
+    async def get_summoner_data(self, puuid):
+        url = f"{self.base_url}/riot/account/v1/accounts/by-puuid/{puuid}"
+        return await self.request(url)
     # --------------------------
     # 🎮 MATCH IDS
     # --------------------------
