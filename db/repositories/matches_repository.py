@@ -88,6 +88,84 @@ class MatchesRepository:
             params,
         )
 
+    async def get_all_matches_json(self) -> list[dict]:
+        rows = await self.db.fetchall(
+            """
+            SELECT raw_json
+            FROM matches
+            WHERE raw_json IS NOT NULL
+            ORDER BY game_start DESC
+            """
+        )
+
+        result = []
+        for row in rows:
+            raw_json = row["raw_json"]
+            if not raw_json:
+                continue
+
+            try:
+                result.append(json.loads(raw_json))
+            except Exception:
+                pass
+
+        return result
+
+    async def insert_player_match_stats_for_puuid(
+        self,
+        match_data: dict[str, Any],
+        puuid: str,
+    ) -> None:
+        match_id = match_data["metadata"]["matchId"]
+        participants = match_data.get("info", {}).get("participants", [])
+
+        target_player = next(
+            (participant for participant in participants if participant.get("puuid") == puuid),
+            None,
+        )
+        if target_player is None:
+            return
+
+        cs = target_player.get("totalMinionsKilled", 0) + target_player.get("neutralMinionsKilled", 0)
+        riot_id = (
+            f"{target_player.get('riotIdGameName', 'Unknown')}"
+            f"#{target_player.get('riotIdTagline', 'Unknown')}"
+        )
+
+        await self.db.execute(
+            """
+            INSERT OR IGNORE INTO player_match_stats (
+                match_id,
+                puuid,
+                riot_id,
+                champion_name,
+                kills,
+                deaths,
+                assists,
+                win,
+                team_id,
+                damage_per_minute,
+                cs,
+                gold_earned
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                match_id,
+                puuid,
+                riot_id,
+                target_player.get("championName"),
+                target_player.get("kills", 0),
+                target_player.get("deaths", 0),
+                target_player.get("assists", 0),
+                1 if target_player.get("win") else 0,
+                target_player.get("teamId"),
+                target_player.get("challenges", {}).get("damagePerMinute", 0),
+                cs,
+                target_player.get("goldEarned", 0),
+            ),
+        )
+
     async def insert_tracked_player_match_stats(self, match_data: dict[str, Any]) -> None:
         tracked_puuids = set(load_players())
         match_id = match_data["metadata"]["matchId"]

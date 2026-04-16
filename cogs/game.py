@@ -78,7 +78,7 @@ class Game(commands.Cog):
     # ⏳ ТАЙМАУТ
     # -------------------------------
     async def timeout(self, session, interaction):
-        await asyncio.sleep(120)
+        await asyncio.sleep(500)
 
         if session["channel_id"] not in self.sessions:
             return
@@ -109,7 +109,7 @@ class Game(commands.Cog):
             try:
                 reaction, user = await self.bot.wait_for(
                     "reaction_add",
-                    timeout=120,
+                    timeout=500,
                     check=check
                 )
 

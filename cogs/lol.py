@@ -240,6 +240,9 @@ class LoL(commands.Cog):
             for match_id in recent_match_ids:
                 exists = await self.matches_repo.match_exists(match_id)
                 if exists:
+                    match_data = await self.matches_repo.get_match_json(match_id)
+                    if match_data:
+                        await self.matches_repo.insert_player_match_stats_for_puuid(match_data, puuid)
                     continue
 
                 match_data = await self.bot.riot_api.get_match_details(match_id)
@@ -247,6 +250,7 @@ class LoL(commands.Cog):
                     continue
 
                 await self.matches_repo.save_full_match(match_data)
+                await self.matches_repo.insert_player_match_stats_for_puuid(match_data, puuid)
                 synced_count += 1
 
             # 5. Получаем матчи игрока из БД

@@ -52,6 +52,7 @@ async def main():
         await bot.load_extension("cogs.game")
         await bot.load_extension("cogs.admin")
         await bot.load_extension("cogs.misc")
+        await bot.load_extension("cogs.records")
         await bot.load_extension("services.match_watcher")
 
         try:
