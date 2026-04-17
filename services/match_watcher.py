@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from datetime import datetime
 
@@ -10,6 +11,13 @@ import random
 
 from config import load_config
 from db.repositories.matches_repository import MatchesRepository
+from utils.helpers import (
+    format_rank_entry,
+    get_queue_display_name,
+    get_ranked_entry_for_queue,
+    get_ranked_queue_label,
+    get_ranked_queue_type,
+)
 from utils.storage import load_players
 
 WIN_PHRASES = [
@@ -29,6 +37,8 @@ LOSS_PHRASES = [
     "❌ НЕКСТ НЕКСТ НЕКСТ",
 ]
 
+WATCHER_PLAYER_DELAY_SECONDS = 1.0
+
 class MatchWatcher(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -42,7 +52,7 @@ class MatchWatcher(commands.Cog):
 
         self.loop.start()
 
-    @tasks.loop(minutes=3)
+    @tasks.loop(minutes=1)
     async def loop(self):
         try:
             if not os.path.exists("data/players.txt"):
@@ -58,7 +68,7 @@ class MatchWatcher(commands.Cog):
 
             # ---------- Первый запуск ----------
             if not self.first_sync_completed:
-                for puuid in tracked_puuids:
+                for index, puuid in enumerate(tracked_puuids, start=1):
                     try:
                         recent_match_ids = await self.bot.riot_api.get_recent_matches(puuid, count=1)
                         if not recent_match_ids:
@@ -76,6 +86,9 @@ class MatchWatcher(commands.Cog):
 
                     except Exception as e:
                         print(f"❌ Ошибка initial sync для {puuid}: {e!r}")
+                    finally:
+                        if index < len(tracked_puuids):
+                            await asyncio.sleep(WATCHER_PLAYER_DELAY_SECONDS)
 
                 self.first_sync_completed = True
                 print("✅ Initial sync завершён")
@@ -85,7 +98,7 @@ class MatchWatcher(commands.Cog):
             # match_id -> set(puuid), чтобы один и тот же матч отправить 1 раз
             new_matches_grouped: dict[str, set[str]] = {}
 
-            for puuid in tracked_puuids:
+            for index, puuid in enumerate(tracked_puuids, start=1):
                 try:
                     recent_match_ids = await self.bot.riot_api.get_recent_matches(puuid, count=1)
                     if not recent_match_ids:
@@ -126,6 +139,9 @@ class MatchWatcher(commands.Cog):
 
                 except Exception as e:
                     print(f"❌ Ошибка проверки игрока {puuid}: {e!r}")
+                finally:
+                    if index < len(tracked_puuids):
+                        await asyncio.sleep(WATCHER_PLAYER_DELAY_SECONDS)
 
             # ---------- Отправка уведомлений ----------
             if new_matches_grouped:
@@ -170,7 +186,32 @@ class MatchWatcher(commands.Cog):
                 print(f"⚠️ Не удалось загрузить матч {match_id} для уведомления")
                 return
 
-        embed = self.build_match_notification_embed(match_data, tracked_set, triggering_puuids)
+        info = match_data.get("info", {})
+        participants = info.get("participants", [])
+        ranked_queue_type = get_ranked_queue_type(info.get("queueId"))
+        rank_entry_map: dict[str, dict | None] = {}
+
+        if ranked_queue_type:
+            puuids = [
+                player.get("puuid")
+                for player in participants
+                if player.get("puuid")
+            ]
+            ranked_entries_by_puuid = await self.bot.riot_api.get_ranked_entries_for_puuids(puuids)
+
+            for puuid, ranked_entries in ranked_entries_by_puuid.items():
+                rank_entry_map[puuid] = get_ranked_entry_for_queue(
+                    ranked_entries,
+                    ranked_queue_type,
+                )
+
+        embed = self.build_match_notification_embed(
+            match_data,
+            tracked_set,
+            triggering_puuids,
+            ranked_queue_type=ranked_queue_type,
+            rank_entry_map=rank_entry_map,
+        )
         await channel.send(embed=embed)
 
     def build_match_notification_embed(
@@ -178,6 +219,8 @@ class MatchWatcher(commands.Cog):
         match_data: dict,
         tracked_set: set[str],
         triggering_puuids: set[str],
+        ranked_queue_type: str | None = None,
+        rank_entry_map: dict[str, dict | None] | None = None,
     ) -> discord.Embed:
         info = match_data.get("info", {})
         metadata = match_data.get("metadata", {})
@@ -198,6 +241,8 @@ class MatchWatcher(commands.Cog):
         minutes = game_duration // 60
         seconds = game_duration % 60
         duration_text = f"{minutes}:{seconds:02d}"
+        queue_name = get_queue_display_name(info.get("queueId"))
+        ranked_queue_label = get_ranked_queue_label(ranked_queue_type)
 
         blue_team = [p for p in participants if p.get("teamId") == 100]
         red_team = [p for p in participants if p.get("teamId") == 200]
@@ -222,14 +267,22 @@ class MatchWatcher(commands.Cog):
             result_text = "🎮 Завершился новый матч"
             tracked_players_text = "Нет игроков из списка"
 
+        description_lines = [
+            tracked_players_text,
+            "",
+            f"**Match ID:** `{match_id}`",
+            f"**Тип:** {queue_name}",
+        ]
+        if ranked_queue_label:
+            description_lines.append(f"**Ранги:** {ranked_queue_label}")
+        description_lines.extend([
+            f"**Start Time:** {match_time_text}",
+            f"**Duration:** {duration_text}",
+        ])
+
         embed = discord.Embed(
             title=result_text,
-            description=(
-                f"{tracked_players_text}\n\n"
-                f"**Match ID:** `{match_id}`\n"
-                f"**Start Time:** {match_time_text}\n"
-                f"**Duration:** {duration_text}"
-            ),
+            description="\n".join(description_lines),
             color=discord.Color.green() if tracked_players_in_match and tracked_players_in_match[0].get("win", False)
             else discord.Color.red() if tracked_players_in_match
             else discord.Color.blurple()
@@ -237,19 +290,35 @@ class MatchWatcher(commands.Cog):
 
         embed.add_field(
             name=f"{'✅' if blue_team and blue_team[0].get('win') else '❌'} Blue Team",
-            value=self.format_team(blue_team, tracked_set),
+            value=self.format_team(
+                blue_team,
+                tracked_set,
+                ranked_queue_type=ranked_queue_type,
+                rank_entry_map=rank_entry_map,
+            ),
             inline=True
         )
 
         embed.add_field(
             name=f"{'✅' if red_team and red_team[0].get('win') else '❌'} Red Team",
-            value=self.format_team(red_team, tracked_set),
+            value=self.format_team(
+                red_team,
+                tracked_set,
+                ranked_queue_type=ranked_queue_type,
+                rank_entry_map=rank_entry_map,
+            ),
             inline=True
         )
 
         return embed
 
-    def format_team(self, team: list[dict], tracked_set: set[str]) -> str:
+    def format_team(
+        self,
+        team: list[dict],
+        tracked_set: set[str],
+        ranked_queue_type: str | None = None,
+        rank_entry_map: dict[str, dict | None] | None = None,
+    ) -> str:
         if not team:
             return "Нет данных"
 
@@ -265,10 +334,18 @@ class MatchWatcher(commands.Cog):
             dpm = player.get("challenges", {}).get("damagePerMinute", 0)
 
             marker = "🎯 " if player.get("puuid") in tracked_set else ""
+            rank_text = None
+            if ranked_queue_type:
+                rank_entry = None if rank_entry_map is None else rank_entry_map.get(player.get("puuid"))
+                rank_text = format_rank_entry(rank_entry, unranked_text="Unranked")
+
+            stats_line = f"{champion} | {kills}/{deaths}/{assists}"
+            if rank_text:
+                stats_line += f" | {rank_text}"
 
             lines.append(
                 f"{marker}**{riot_name[:20]}**\n"
-                f"{champion} | {kills}/{deaths}/{assists}\n"
+                f"{stats_line}\n"
                 f"{dpm:.0f} DPM | CS {cs} | Gold {gold}\n"
             )
 

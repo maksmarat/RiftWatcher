@@ -1,16 +1,29 @@
-import aiohttp
+import asyncio
 from datetime import datetime
+from time import monotonic
+
+import aiohttp
 
 
 class RiotAPI:
-    def __init__(self, api_key: str, region: str = "europe"):
+    RANKED_CACHE_TTL_SECONDS = 300
+
+    def __init__(
+        self,
+        api_key: str,
+        region: str = "europe",
+        platform_region: str = "ru",
+    ):
         self.api_key = api_key
         self.region = region
+        self.platform_region = platform_region
 
         self.base_url = f"https://{region}.api.riotgames.com"
+        self.platform_base_url = f"https://{platform_region}.api.riotgames.com"
         self.headers = {"X-Riot-Token": self.api_key}
 
         self.session: aiohttp.ClientSession | None = None
+        self.ranked_entries_cache: dict[str, tuple[float, list[dict]]] = {}
 
     # --------------------------
     # 🔧 SESSION INIT
@@ -24,7 +37,6 @@ class RiotAPI:
     # --------------------------
     async def request(self, url, params=None):
         await self.init()
-
         async with self.session.get(url, params=params) as resp:
             if resp.status == 200:
                 return await resp.json()
@@ -62,6 +74,51 @@ class RiotAPI:
     async def get_match_details(self, match_id):
         url = f"{self.base_url}/lol/match/v5/matches/{match_id}"
         return await self.request(url)
+
+    async def get_ranked_entries(self, puuid: str, force_refresh: bool = False):
+        cache_entry = self.ranked_entries_cache.get(puuid)
+        now = monotonic()
+
+        if (
+            not force_refresh
+            and cache_entry is not None
+            and now - cache_entry[0] < self.RANKED_CACHE_TTL_SECONDS
+        ):
+            return cache_entry[1]
+
+        url = f"{self.platform_base_url}/lol/league/v4/entries/by-puuid/{puuid}"
+        data = await self.request(url)
+
+        if data is None:
+            return []
+
+        self.ranked_entries_cache[puuid] = (now, data)
+        return data
+
+    async def get_ranked_entries_for_puuids(self, puuids: list[str]) -> dict[str, list[dict]]:
+        unique_puuids: list[str] = []
+        seen: set[str] = set()
+
+        for puuid in puuids:
+            if not puuid or puuid in seen:
+                continue
+            seen.add(puuid)
+            unique_puuids.append(puuid)
+
+        ranked_entries_list = await asyncio.gather(
+            *(self.get_ranked_entries(puuid) for puuid in unique_puuids),
+            return_exceptions=True,
+        )
+
+        result: dict[str, list[dict]] = {}
+        for puuid, ranked_entries in zip(unique_puuids, ranked_entries_list):
+            if isinstance(ranked_entries, Exception):
+                print(f"Riot API ranked entries error for {puuid}: {ranked_entries!r}")
+                result[puuid] = []
+            else:
+                result[puuid] = ranked_entries or []
+
+        return result
 
     # --------------------------
     # 📊 FORMAT MATCH

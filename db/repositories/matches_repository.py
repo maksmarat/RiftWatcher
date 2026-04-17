@@ -227,9 +227,8 @@ class MatchesRepository:
         await self.upsert_tracked_participants(match_data)
         await self.insert_tracked_player_match_stats(match_data)
 
-    async def get_recent_matches_for_player(self, puuid: str, limit: int = 5):
-        return await self.db.fetchall(
-            """
+    async def get_recent_matches_for_player(self, puuid: str, limit: int | None = 5):
+        query = """
             SELECT
                 pms.match_id,
                 pms.riot_id,
@@ -250,10 +249,14 @@ class MatchesRepository:
             JOIN matches m ON m.match_id = pms.match_id
             WHERE pms.puuid = ?
             ORDER BY m.game_start DESC
-            LIMIT ?
-            """,
-            (puuid, limit),
-        )
+        """
+        params: list[Any] = [puuid]
+
+        if limit is not None:
+            query += "\n            LIMIT ?"
+            params.append(limit)
+
+        return await self.db.fetchall(query, tuple(params))
 
     async def get_match_stats_for_tracked_players(self, match_id: str):
         return await self.db.fetchall(

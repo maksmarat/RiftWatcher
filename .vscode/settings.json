@@ -1,5 +1,7 @@
 {
-    "python.analysis.extraPaths": [
-        "./Lib/site-packages"
-    ]
+  "python.analysis.extraPaths": ["./Lib/site-packages"],
+  "Lua.workspace.userThirdParty": [
+    "c:\\Users\\maksmarat\\AppData\\Roaming\\Code\\User\\workspaceStorage\\ae40c33c41483ea17bf2be02c39b21f0\\justarandomgeek.factoriomod-debug\\sumneko-3rd"
+  ],
+  "Lua.workspace.checkThirdParty": "ApplyInMemory"
 }
