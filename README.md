@@ -1,6 +1,6 @@
 # CCG Bot
 
-CCG Bot is a Discord bot for tracking League of Legends matches for a curated group of players. It syncs match history through the Riot API, stores raw match payloads and derived stats in SQLite, and exposes slash commands for match analysis, shared-game search, live status checks, records, and automated post-match notifications.
+CCG Bot is a Discord bot for tracking League of Legends matches for a curated group of players. It syncs match history through the Riot API, stores raw match payloads and derived stats in SQLite, and exposes slash commands for match analysis, shared-game search, live status checks, records, database stats, and automated post-match notifications.
 
 ## Overview
 
@@ -21,6 +21,8 @@ The bot uses slash commands built on `discord.py`, a lightweight SQLite persiste
 - result filters are available for wins, losses, or all matches
 - current solo queue and flex rank information is shown alongside match history when available
 - `/matchdetails` expands a selected match into full blue/red team breakdowns with KDA, DPM, CS, gold, queue name, and duration
+- match details now add a match-wide placement marker such as `#1`, `#2`, plus `MVP` or `ACE` badges directly in the team view
+- the MVP scoring is role-aware and blends combat, economy, vision, utility, durability, objectives, and playmaking signals
 - ranked queue match details also include current participant rank text for the relevant queue
 - `/records` calculates best stored performances across tracked players
 - `/dbstats` summarizes the local dataset, including players, matches, stored stat rows, total playtime, average game length, and total question-mark pings
@@ -38,6 +40,7 @@ The bot uses slash commands built on `discord.py`, a lightweight SQLite persiste
 - the watcher performs an initial sync to avoid replaying old matches as fresh notifications
 - new matches are stored once even if multiple tracked players were in the same game
 - notifications are grouped per match and sent only once to the configured Discord channel
+- match notification embeds now show the same global placement markers and `MVP` or `ACE` badges used by `/matchdetails`
 - ranked queue notifications include queue labels and current rank text for participants
 - ranked entry lookups are cached briefly to reduce repeated Riot API calls during command usage and background sync
 
@@ -50,6 +53,7 @@ The bot uses slash commands built on `discord.py`, a lightweight SQLite persiste
 - `/whoingame` checks which tracked players are currently in an active game
 - `/ping` and `/helplol` provide health and command discovery utilities
 - `/5stars` runs a role-draw mini-game for five players with one disliked role per user
+- `/5stars` now prevents more than one player from selecting support as the disliked role in the same session
 
 ## Commands
 
@@ -58,7 +62,7 @@ All Riot player arguments use the `gameName#tagLine` format.
 | Command | Description |
 | --- | --- |
 | `/lolstats nickname [count] [queue] [result]` | Sync recent matches for a player and show paginated match history with optional queue and result filters. |
-| `/matchdetails nickname match_number` | Show a detailed breakdown of a match using the numbering from `/lolstats`. |
+| `/matchdetails nickname match_number` | Show a detailed breakdown of a match using the numbering from `/lolstats`, including match-wide MVP placement markers. |
 | `/search nickname [character_name] [nickname_2] [nickname_3] [nickname_4] [nickname_5]` | Search a player's stored matches either by champion or by shared games with other players. |
 | `/whoingame` | Check which tracked players are currently in an active match. |
 | `/records` | Show the best saved records across tracked players. |
@@ -78,6 +82,7 @@ All Riot player arguments use the `gameName#tagLine` format.
 - Omitting `count` in `/lolstats` uses all matches currently stored in the local database for that player.
 - `/search` accepts either `character_name` or additional player nicknames, not both in the same request.
 - `/matchdetails` uses the same match numbering order as `/lolstats`, where `1` is the newest match.
+- In `/5stars`, support can only be claimed once as the disliked role within a single lobby.
 
 ## Architecture
 
@@ -88,7 +93,7 @@ The codebase is organized into a small set of focused layers:
 - `services/match_watcher.py` handles background polling, synchronization, and notification delivery
 - `riot/riot_api.py` wraps Riot account, match, spectator, and ranked-entry requests
 - `db/` contains the schema, SQLite wrapper, and repository layer
-- `utils/` contains flat-file storage helpers and shared formatting/filtering utilities
+- `utils/` contains flat-file storage helpers, shared formatting/filtering utilities, record definitions, and the role-aware MVP scoring engine
 - `data/` stores the local SQLite database and file-based configuration
 
 ### Storage Model
@@ -136,6 +141,7 @@ CCG bot/
 |     \- players_repository.py
 |- utils/
 |  |- helpers.py
+|  |- mvp.py
 |  |- record_definitions.py
 |  \- storage.py
 \- data/
@@ -193,3 +199,4 @@ From an engineering and portfolio perspective, the project demonstrates:
 - local persistence with SQLite and a repository-style data access layer
 - background polling and notification fan-out
 - derived analytics computed from raw third-party API payloads
+- role-aware MVP scoring built from per-match gameplay signals

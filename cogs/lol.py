@@ -16,6 +16,7 @@ from utils.helpers import (
     parse_riot_id,
     queue_matches_filter,
 )
+from utils.mvp import MatchMVPSummary, build_match_mvp_summary
 from db.repositories.players_repository import PlayersRepository
 from db.repositories.matches_repository import MatchesRepository
 
@@ -526,6 +527,7 @@ class LoL(commands.Cog):
 
             info = match_data.get("info", {})
             participants = info.get("participants", [])
+            mvp_summary = build_match_mvp_summary(participants)
 
             # 7. Ищем целевого игрока
             target_player = next(
@@ -576,6 +578,7 @@ class LoL(commands.Cog):
                 value=self.format_team(
                     blue_team,
                     puuid,
+                    mvp_summary=mvp_summary,
                     ranked_queue_type=ranked_queue_type,
                     rank_entry_map=rank_entry_map,
                 ),
@@ -587,6 +590,7 @@ class LoL(commands.Cog):
                 value=self.format_team(
                     red_team,
                     puuid,
+                    mvp_summary=mvp_summary,
                     ranked_queue_type=ranked_queue_type,
                     rank_entry_map=rank_entry_map,
                 ),
@@ -606,7 +610,7 @@ class LoL(commands.Cog):
             else:
                 kda = (target_kills + target_assists) / target_deaths
 
-            embed.set_footer(text=f"{nickname} {target_kills}/{target_deaths}/{target_assists} KDA: {kda:.2f}       |       Riot API        CCG Bot")
+            embed.set_footer(text=f"Riot API        CCG Bot")
             await interaction.followup.send(embed=embed)
 
         except Exception as e:
@@ -723,6 +727,7 @@ class LoL(commands.Cog):
         self,
         team: list[dict],
         target_puuid: str,
+        mvp_summary: MatchMVPSummary,
         ranked_queue_type: str | None = None,
         rank_entry_map: dict[str, dict | None] | None = None,
     ) -> str:
@@ -745,16 +750,22 @@ class LoL(commands.Cog):
             if ranked_queue_type:
                 rank_entry = None if rank_entry_map is None else rank_entry_map.get(player.get("puuid"))
                 rank_text = format_rank_entry(rank_entry, unranked_text="Unranked")
+            mvp_entry = mvp_summary.get_for_player(player)
 
             stats_line = f"{champion} | {kills}/{deaths}/{assists}"
             if rank_text:
                 stats_line += f" | {rank_text}"
 
-            lines.append(
-                f"{marker}**{riot_name[:20]}**\n"
-                f"{stats_line}\n"
-                f"{dpm:.0f} DPM | CS {cs} | Gold {gold}\n"
-            )
+            extra_line = f"{dpm:.0f} DPM | CS {cs} | Gold {gold}"
+
+            name_line = f"{marker}**{riot_name[:20]}"
+            if mvp_entry is not None:
+                name_line += f" | #{mvp_entry.rank}"
+                if mvp_entry.badge:
+                    name_line += f" {mvp_entry.badge}"
+            name_line += "**"
+
+            lines.append(f"{name_line}\n{stats_line}\n{extra_line}\n")
 
         text = "\n".join(lines)
 

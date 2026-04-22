@@ -18,6 +18,7 @@ from utils.helpers import (
     get_ranked_queue_label,
     get_ranked_queue_type,
 )
+from utils.mvp import MatchMVPSummary, build_match_mvp_summary
 from utils.storage import load_players
 
 WIN_PHRASES = [
@@ -243,6 +244,7 @@ class MatchWatcher(commands.Cog):
         duration_text = f"{minutes}:{seconds:02d}"
         queue_name = get_queue_display_name(info.get("queueId"))
         ranked_queue_label = get_ranked_queue_label(ranked_queue_type)
+        mvp_summary = build_match_mvp_summary(participants)
 
         blue_team = [p for p in participants if p.get("teamId") == 100]
         red_team = [p for p in participants if p.get("teamId") == 200]
@@ -293,10 +295,11 @@ class MatchWatcher(commands.Cog):
             value=self.format_team(
                 blue_team,
                 tracked_set,
+                mvp_summary=mvp_summary,
                 ranked_queue_type=ranked_queue_type,
                 rank_entry_map=rank_entry_map,
             ),
-            inline=True
+            inline=True,
         )
 
         embed.add_field(
@@ -304,10 +307,11 @@ class MatchWatcher(commands.Cog):
             value=self.format_team(
                 red_team,
                 tracked_set,
+                mvp_summary=mvp_summary,
                 ranked_queue_type=ranked_queue_type,
                 rank_entry_map=rank_entry_map,
             ),
-            inline=True
+            inline=True,
         )
 
         return embed
@@ -316,6 +320,7 @@ class MatchWatcher(commands.Cog):
         self,
         team: list[dict],
         tracked_set: set[str],
+        mvp_summary: MatchMVPSummary,
         ranked_queue_type: str | None = None,
         rank_entry_map: dict[str, dict | None] | None = None,
     ) -> str:
@@ -338,16 +343,21 @@ class MatchWatcher(commands.Cog):
             if ranked_queue_type:
                 rank_entry = None if rank_entry_map is None else rank_entry_map.get(player.get("puuid"))
                 rank_text = format_rank_entry(rank_entry, unranked_text="Unranked")
+            mvp_entry = mvp_summary.get_for_player(player)
 
             stats_line = f"{champion} | {kills}/{deaths}/{assists}"
             if rank_text:
                 stats_line += f" | {rank_text}"
 
-            lines.append(
-                f"{marker}**{riot_name[:20]}**\n"
-                f"{stats_line}\n"
-                f"{dpm:.0f} DPM | CS {cs} | Gold {gold}\n"
-            )
+            extra_line = f"{dpm:.0f} DPM | CS {cs} | Gold {gold}"
+            name_line = f"{marker}**{riot_name[:20]}"
+            if mvp_entry is not None:
+                name_line += f" | #{mvp_entry.rank}"
+                if mvp_entry.badge:
+                    name_line += f" {mvp_entry.badge}"
+            name_line += "**"
+
+            lines.append(f"{name_line}\n{stats_line}\n{extra_line}\n")
 
         text = "\n".join(lines)
 

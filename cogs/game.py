@@ -14,6 +14,7 @@ ROLE_EMOJIS = {
 }
 
 ALL_ROLES = list(ROLE_EMOJIS.values())
+SUPPORT_ROLE = "сап"
 
 
 class Game(commands.Cog):
@@ -114,6 +115,19 @@ class Game(commands.Cog):
                 )
 
                 role = ROLE_EMOJIS[str(reaction.emoji)]
+
+                if role == SUPPORT_ROLE and SUPPORT_ROLE in session["players"].values():
+                    try:
+                        await reaction.remove(user)
+                    except:
+                        pass
+
+                    temp_msg = await interaction.followup.send(
+                        f"❌ {user.mention} роль **{role}** уже занята как нелюбимая. Выбери другую роль."
+                    )
+                    session["temp_messages"].append(temp_msg.id)
+                    continue
+
                 session["players"][user.id] = role
 
                 # убираем реакцию
